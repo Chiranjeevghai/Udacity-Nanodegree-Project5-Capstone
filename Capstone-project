@@ -1,0 +1,476 @@
+{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": 1,
+   "metadata": {
+    "collapsed": false
+   },
+   "outputs": [],
+   "source": [
+    "import tensorflow as tf\n",
+    "import scipy.io as scp\n",
+    "import numpy as np\n",
+    "import random\n",
+    "from scipy import misc\n",
+    "import matplotlib.pyplot as plt\n",
+    "import datetime\n",
+    "\n",
+    "#To plot the graphs in jupyter\n",
+    "get_ipython().magic(u'matplotlib inline')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 2,
+   "metadata": {
+    "collapsed": false
+   },
+   "outputs": [],
+   "source": [
+    "\n",
+    "# Load SVHN data in variables\n",
+    "trainData = scp.loadmat('../data/train_32x32.mat')\n",
+    "testData=scp.loadmat('../data/test_32x32.mat')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
+   "metadata": {
+    "collapsed": false
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "(32, 32, 3, 73257)\n",
+      "(73257, 1)\n",
+      "(32, 32, 3, 26032)\n",
+      "(26032, 1)\n"
+     ]
+    }
+   ],
+   "source": [
+    "# shape of data for images and labels\n",
+    "print trainData['X'].shape\n",
+    "print trainData['y'].shape\n",
+    "print testData['X'].shape\n",
+    "print testData['y'].shape\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 4,
+   "metadata": {
+    "collapsed": false
+   },
+   "outputs": [],
+   "source": [
+    "# normalizing the data in range of -1 to 1. as the images are in format of 32*32 in 3 channels for RGB i will use a factor of 128 to divide datasets and subtract 1 to make it in a range of -1 to 1\n",
+    "\n",
+    "trainDataX = trainData['X'].astype('float32') / 128.0 - 1                                                                                                                     \n",
+    "testDataX = testData['X'].astype('float32') / 128.0 - 1 \n",
+    "\n",
+    "trainDataY=trainData['y']\n",
+    "testDataY=testData['y']"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 5,
+   "metadata": {
+    "collapsed": true
+   },
+   "outputs": [],
+   "source": [
+    "# function for one hot encoding so that machine can easily differntiate between differnet classes and increase accuracy .in this we have to change label for image representing 0 as by default it's label is 10 \n",
+    "def OnehotEndoding(Y):\n",
+    "    Ytr=[]\n",
+    "    for el in Y:\n",
+    "        temp=np.zeros(10)\n",
+    "        if el==10:\n",
+    "            temp[0]=1\n",
+    "        else:\n",
+    "            temp[el] = 1\n",
+    "        Ytr.append(temp)\n",
+    "\n",
+    "    return np.asarray(Ytr)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 6,
+   "metadata": {
+    "collapsed": true
+   },
+   "outputs": [],
+   "source": [
+    "trainDataY = OnehotEndoding(trainDataY)\n",
+    "testDataY = OnehotEndoding(testDataY)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 7,
+   "metadata": {
+    "collapsed": false
+   },
+   "outputs": [],
+   "source": [
+    "# I am changing the shape of training as well as testing data from (32,32,3,73257) to (73252,32,32,3) so that this shape matches the one of our label that is (73257,1)\n",
+    "\n",
+    "def transposeArray(data):\n",
+    "    xtrain = []\n",
+    "    trainLen = data.shape[3]\n",
+    "    \n",
+    "  \n",
+    "    for x in xrange(trainLen):\n",
+    "        xtrain.append(data[:,:,:,x])\n",
+    "      \n",
+    "\n",
+    "    xtrain = np.asarray(xtrain)\n",
+    "    return xtrain\n",
+    "\n",
+    "trainDataX = transposeArray(trainDataX)\n",
+    "testDataX = transposeArray(testDataX)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 8,
+   "metadata": {
+    "collapsed": false
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "(73257, 32, 32, 3)\n",
+      "(26032, 32, 32, 3)\n"
+     ]
+    }
+   ],
+   "source": [
+    "print trainDataX.shape\n",
+    "print testDataX.shape\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 9,
+   "metadata": {
+    "collapsed": true
+   },
+   "outputs": [],
+   "source": [
+    "\n",
+    "# Function to initialize weights. It is good to initialize weights with small amount of noise for symmetry breaking, and to prevent 0 gradients. \n",
+    "def weight_variable(shape):\n",
+    "    \"\"\"Args:\n",
+    "            shape: a list of 4 integer [patch size,patch size,channels,depth]\"\"\"\n",
+    "    initial = tf.truncated_normal(shape, stddev=0.1)\n",
+    "    return tf.Variable(initial)\n",
+    "\n",
+    "\n",
+    "#Function to initialize bias\n",
+    "def bias_variable(shape):\n",
+    "    \"\"\"Args:\n",
+    "            shape: a list containing depth\"\"\"\n",
+    "    initial = tf.constant(0.1, shape=shape)\n",
+    "    return tf.Variable(initial)\n",
+    "\n",
+    "# Convolution Function. In this i am using stride of one and are zero padded so that the output is the same size as the input\n",
+    "def conv2d(x, W):\n",
+    "    \"\"\"Args:\n",
+    "            input: matrix of input to the convolution layer \n",
+    "            weights: weights Matrix\"\"\"\n",
+    "    return tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding='SAME')\n",
+    "\n",
+    "\n",
+    "# Pooling Function. In this is used for 2X2 max_pooling\n",
+    "def max_pool_2x2(x):\n",
+    "    return tf.nn.max_pool(x, ksize=[1, 2, 2, 1],\n",
+    "                        strides=[1, 2, 2, 1], padding='SAME')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 10,
+   "metadata": {
+    "collapsed": true
+   },
+   "outputs": [],
+   "source": [
+    "sess = tf.InteractiveSession()\n",
+    "\n",
+    "#x,_y are placeholders for values that we'll input when we ask Tensorflow to run computation\n",
+    "\n",
+    "\n",
+    "x = tf.placeholder(tf.float32, shape=[None, 32,32,3])\n",
+    "y_ = tf.placeholder(tf.float32, shape=[None, 10])\n",
+    "\n",
+    "\n",
+    "\n",
+    "# First convolution layer.\n",
+    "# It will consist of convolution, followed by max pooling. \n",
+    "# The convolutional will compute 32 features for each 5x5 patch. \n",
+    "# Its weight tensor will have a shape of [5, 5, 3, 32].\n",
+    "# The first two dimensions are the patch size, the next is the number of input channels, and the last is the number of output channels. \n",
+    "# We will also have a bias vector with a component for each output channel. \n",
+    "\n",
+    "W_conv1 = weight_variable([5, 5, 3, 32])\n",
+    "b_conv1 = bias_variable([32])\n",
+    "x_image = tf.reshape(x, [-1,32,32,3])\n",
+    "\n",
+    "# Applying convolution between x_image and weight tensor and then apllying max pooling.\n",
+    "h_conv1 = tf.nn.relu(conv2d(x_image, W_conv1) + b_conv1)\n",
+    "h_pool1 = max_pool_2x2(h_conv1)\n",
+    "\n",
+    "# Second Layer of Convolution similar to first one to make network deep. This layer will have 64 features for each 5X5 patch\n",
+    "W_conv2=weight_variable([5, 5, 32, 64])\n",
+    "b_conv2=bias_variable([64])\n",
+    "h_conv2 = tf.nn.relu(conv2d(h_pool1, W_conv2) + b_conv2)\n",
+    "h_pool2 = max_pool_2x2(h_conv2)\n",
+    "\n",
+    "# Densely Connected Layer\n",
+    "# Now that the image size has been reduced to 8x8, we add a fully-connected layer with 1024 neurons\n",
+    "# to allow processing on the entire image.\n",
+    "# We reshape the tensor from the pooling layer into a batch of vectors, multiply by a weight matrix, add a bias, and apply a ReLU.\n",
+    "\n",
+    "\n",
+    "W_fc1=weight_variable([8*8*64,1024])\n",
+    "b_fc1=bias_variable([1024])\n",
+    "h_pool2_flat = tf.reshape(h_pool2, [-1, 8*8*64])\n",
+    "h_fc1 = tf.nn.relu(tf.matmul(h_pool2_flat, W_fc1) + b_fc1)\n",
+    "\n",
+    "\n",
+    "# Dropout \n",
+    "# To reduce overfitting, we will apply dropout before the readout layer.\n",
+    "\n",
+    "keep_prob = tf.placeholder(tf.float32)\n",
+    "h_fc1_drop = tf.nn.dropout(h_fc1, keep_prob)\n",
+    "\n",
+    "\n",
+    "\n",
+    "# Readout Layer\n",
+    "# A softmax layer.\n",
+    "\n",
+    "W_fc2 = weight_variable([1024, 10])\n",
+    "b_fc2 = bias_variable([10])\n",
+    "\n",
+    "logits = tf.matmul(h_fc1_drop, W_fc2) + b_fc2\n",
+    "y_conv=tf.nn.softmax(logits)\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 11,
+   "metadata": {
+    "collapsed": false
+   },
+   "outputs": [],
+   "source": [
+    "\n",
+    "with tf.name_scope('cross_entropy'):\n",
+    "    cross_entropy = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits, y_))\n",
+    "\n",
+    "\n",
+    "\n",
+    "# Optimizer.\n",
+    "# Using more sophosticted Adams Optimizer for contrilling learning rate than steepest gradient descent optimizer\n",
+    "\n",
+    "with tf.name_scope('optimizer'):\n",
+    "    train_step = tf.train.AdamOptimizer(1e-4).minimize(cross_entropy)\n",
+    "\n",
+    "# correct Predictions\n",
+    "\n",
+    "with tf.name_scope('correct_predictions'):\n",
+    "    correct_prediction = tf.equal(tf.argmax(y_conv,1), tf.argmax(y_,1))\n",
+    "\n",
+    "# accuracy \n",
+    "with tf.name_scope('accuracy'):\n",
+    "    accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))\n",
+    "    \n",
+    "# Create a summary to monitor cost tensor\n",
+    "tf.scalar_summary(\"cross_entropy\", cross_entropy)\n",
+    "# Create a summary to monitor accuracy tensor\n",
+    "tf.scalar_summary(\"accuracy\", accuracy)\n",
+    "# Merge all summaries into a single op\n",
+    "merged_summary_op = tf.merge_all_summaries()\n",
+    "\n",
+    "\n",
+    "\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 15,
+   "metadata": {
+    "collapsed": false
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "started at :  2016-08-18 10:35:37.057996\n",
+      "step 0, training accuracy 0.109375\n",
+      "step 500, training accuracy 0.515625\n",
+      "step 1000, training accuracy 0.625\n",
+      "step 1500, training accuracy 0.734375\n",
+      "step 2000, training accuracy 0.84375\n",
+      "step 2500, training accuracy 0.828125\n",
+      "step 3000, training accuracy 0.84375\n",
+      "step 3500, training accuracy 0.890625\n",
+      "step 4000, training accuracy 0.8125\n",
+      "step 4500, training accuracy 0.921875\n",
+      "step 5000, training accuracy 0.875\n",
+      "step 5500, training accuracy 0.953125\n",
+      "step 6000, training accuracy 0.859375\n",
+      "step 6500, training accuracy 0.90625\n",
+      "step 7000, training accuracy 0.875\n",
+      "step 7500, training accuracy 0.90625\n",
+      "step 8000, training accuracy 0.921875\n",
+      "step 8500, training accuracy 0.90625\n",
+      "step 9000, training accuracy 0.90625\n",
+      "step 9500, training accuracy 0.84375\n",
+      "step 10000, training accuracy 0.96875\n",
+      "step 10500, training accuracy 0.921875\n",
+      "step 11000, training accuracy 0.96875\n",
+      "step 11500, training accuracy 0.953125\n",
+      "step 12000, training accuracy 0.921875\n",
+      "step 12500, training accuracy 0.9375\n",
+      "step 13000, training accuracy 0.96875\n",
+      "step 13500, training accuracy 0.953125\n",
+      "step 14000, training accuracy 0.953125\n",
+      "step 14500, training accuracy 0.953125\n",
+      "step 15000, training accuracy 0.96875\n",
+      "step 15500, training accuracy 0.9375\n",
+      "step 16000, training accuracy 0.9375\n",
+      "step 16500, training accuracy 0.96875\n",
+      "step 17000, training accuracy 0.921875\n",
+      "step 17500, training accuracy 0.984375\n",
+      "step 18000, training accuracy 0.96875\n",
+      "step 18500, training accuracy 0.984375\n",
+      "step 19000, training accuracy 0.96875\n",
+      "step 19500, training accuracy 1\n",
+      "test accuracy 0.896512\n",
+      "Ended at :  2016-08-18 16:30:18.265973\n"
+     ]
+    }
+   ],
+   "source": [
+    "print  'started at : ', str(datetime.datetime.now())\n",
+    "with tf.Session() as sess:\n",
+    "    epoch=20000\n",
+    "    batch_size=64\n",
+    "    \n",
+    "    #train_writer = tf.train.SummaryWriter('/Users/prince/Desktop/Svhn/tensorflow',graph=tf.get_default_graph())\n",
+    "\n",
+    "    train_writer = tf.train.SummaryWriter('/tmp/mnist_logs',\n",
+    "                                      sess.graph)\n",
+    "    \n",
+    "    sess.run(tf.initialize_all_variables())\n",
+    "    \n",
+    "    \n",
+    "    p = np.random.permutation(range(len(trainDataX)))\n",
+    "    trX, trY = trainDataX[p], trainDataY[p]\n",
+    "  \n",
+    "    start = 0\n",
+    "    end = 0  \n",
+    "    for step in range(epoch):\n",
+    "        start = end\n",
+    "        end = start + batch_size\n",
+    "\n",
+    "        if start >= len(trainDataX):\n",
+    "            start = 0\n",
+    "            end = start + batch_size\n",
+    "\n",
+    "        if end >= len(trainDataX):\n",
+    "            end = len(trainDataX) - 1\n",
+    "            \n",
+    "        if start == end:\n",
+    "            start = 0\n",
+    "            end = start + batch_size\n",
+    "        \n",
+    "        inX, outY = trX[start:end], trY[start:end]\n",
+    "        #_, summary=sess.run([train_step, merged_summaries], feed_dict={x: inX, y_: outY, keep_prob: 0.5})\n",
+    "        \n",
+    "        _, summary = sess.run([train_step, merged_summary_op], feed_dict= {x: inX, y_: outY, keep_prob:0.5})\n",
+    "        train_writer.add_summary(summary, step)\n",
+    "        #train_step.run(feed_dict={x: inX, y_: outY, keep_prob: 0.5})\n",
+    "        if step % 500 == 0:\n",
+    "            train_accuracy = accuracy.eval(feed_dict={x: inX, y_: outY, keep_prob:1})\n",
+    "            print(\"step %d, training accuracy %g\"%(step, train_accuracy))\n",
+    "            \n",
+    "        \n",
+    "        \n",
+    "\n",
+    "    print(\"test accuracy %g\"%accuracy.eval(feed_dict={\n",
+    "    x: testDataX, y_:testDataY , keep_prob: 1.0}))\n",
+    "    \n",
+    "\n",
+    "print  'Ended at : ', str(datetime.datetime.now())\n",
+    "\n",
+    "    \n",
+    "\n",
+    "    \n",
+    "    \n",
+    "    \n",
+    "    "
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": true
+   },
+   "outputs": [],
+   "source": [
+    "# Results on dual core mac with 8 gb ram\n",
+    "\n",
+    "# For 10000 epochs and a batch size of 64 \n",
+    "# testing Accuracy 88.43%\n",
+    "# total time taken 59 min \n",
+    "\n",
+    "\n",
+    "# For 20000 epochs and a batch size of 64\n",
+    "# Testing Accuracy 89.65%\n",
+    "# total time 45 min\n",
+    "\n",
+    "#For 10000 epochs and a batch size of 16\n",
+    "#Testing Accuracy 85.66%\n",
+    "#Total time 27 min\n",
+    "\n",
+    "\n",
+    "\n"
+   ]
+  }
+ ],
+ "metadata": {
+  "anaconda-cloud": {},
+  "kernelspec": {
+   "display_name": "Python [Root]",
+   "language": "python",
+   "name": "Python [Root]"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 2
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython2",
+   "version": "2.7.12"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 0
+}
